@@ -1,0 +1,14 @@
+{
+  "name": "fpl-telegram-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "canvas": "^2.11.2",
+    "node-telegram-bot-api": "^0.61.0"
+  }
+}
