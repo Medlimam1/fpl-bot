@@ -1,75 +1,85 @@
-// FPL Telegram Bot - Advanced Version with Transfers, Languages, and Team Image
+// FPL Telegram Bot with /price command, daily update, and Google Sheets integration
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
+const cheerio = require("cheerio");
 const fs = require("fs");
-const { createCanvas, loadImage } = require("canvas");
+const { createCanvas } = require("canvas");
+const cron = require("node-cron");
+const { GoogleSpreadsheet } = require("google-spreadsheet");
+require("dotenv").config();
 
-const token = "7566434947:AAG-Ep3WrvoHflkDASBGTmqFI2pazr_aij4";
+const token = process.env.TELEGRAM_BOT_TOKEN ;
 const bot = new TelegramBot(token, { polling: true });
 
 let playerData = [];
-let teamData = [];
-let fixturesData = [];
 const userLang = {};
 const userTeams = {};
+const priceSubscribers = new Set();
+
+const fetchFPLData = async () => {
+  const res = await axios.get("https://fantasy.premierleague.com/api/bootstrap-static/");
+  playerData = res.data.elements;
+};
+
+const getLang = (chatId) => userLang[chatId] || "ar";
 
 const translations = {
   ar: {
     welcome: "👋 أهلاً بك في بوت تحليل FPL! أرسل /lang en أو /lang fr لتغيير اللغة.",
-    askTeam: "📌 أرسل فريقك الآن (كل اسم لاعب في سطر)",
     tooShort: "⚠️ أرسل على الأقل 11 لاعب.",
     totalPoints: "📊 مجموع النقاط المتوقعة:",
     notFound: "❌ غير موجود",
     captain: "⭐ الكابتن المقترح:",
     vice: "🎯 نائب الكابتن:",
     langSet: "✅ تم تغيير اللغة إلى العربية",
-    transferHeader: "🔁 اقتراحات تبديلات:",
-    transferOut: "🚫 اقتراح إخراج:",
-    transferIn: "✅ اقتراح إدخال:",
-    imageCaption: "📸 صورة مبدئية لتشكيلة الفريق"
+    priceHeader: "📈 تغيّرات الأسعار المتوقعة الليلة:",
+    rising: "🔼 سيرتفع السعر:",
+    falling: "🔽 سينخفض السعر:",
+    subscribed: "✅ سيتم إرسال تحديث تغيّرات الأسعار لك يوميًا في الليل.",
   },
   en: {
     welcome: "👋 Welcome to FPL Bot! Use /lang ar or /lang fr to change language.",
-    askTeam: "📌 Please send your team (one player per line)",
     tooShort: "⚠️ Please send at least 11 players.",
     totalPoints: "📊 Total Expected Points:",
     notFound: "❌ Not found",
     captain: "⭐ Suggested Captain:",
     vice: "🎯 Vice Captain:",
     langSet: "✅ Language set to English",
-    transferHeader: "🔁 Transfer Suggestions:",
-    transferOut: "🚫 Suggested OUT:",
-    transferIn: "✅ Suggested IN:",
-    imageCaption: "📸 Preview of your team lineup"
+    priceHeader: "📈 Tonight's Expected Price Changes:",
+    rising: "🔼 Price Rising:",
+    falling: "🔽 Price Falling:",
+    subscribed: "✅ You will now receive daily price updates at night.",
   },
   fr: {
     welcome: "👋 Bienvenue dans le bot FPL ! Utilisez /lang ar ou /lang en pour changer de langue.",
-    askTeam: "📌 Envoyez votre équipe (un joueur par ligne)",
     tooShort: "⚠️ Envoyez au moins 11 joueurs.",
     totalPoints: "📊 Total des points attendus:",
     notFound: "❌ Introuvable",
     captain: "⭐ Capitaine suggéré:",
     vice: "🎯 Vice-capitaine:",
     langSet: "✅ Langue changée en français",
-    transferHeader: "🔁 Suggestions de transferts:",
-    transferOut: "🚫 Joueurs à remplacer:",
-    transferIn: "✅ Joueurs recommandés:",
-    imageCaption: "📸 Aperçu de votre formation"
+    priceHeader: "📈 Changements de prix attendus ce soir:",
+    rising: "🔼 Augmentations de prix:",
+    falling: "🔽 Baisses de prix:",
+    subscribed: "✅ Vous recevrez désormais les changements de prix tous les soirs.",
   },
 };
 
-const fetchFPLData = async () => {
-  const res = await axios.get("https://fantasy.premierleague.com/api/bootstrap-static/");
-  playerData = res.data.elements;
-  teamData = res.data.teams;
-};
+const doc = new GoogleSpreadsheet(process.env.SHEET_ID);
 
-const fetchFixtures = async () => {
-  const res = await axios.get("https://fantasy.premierleague.com/api/fixtures/?future=1");
-  fixturesData = res.data;
-};
-
-const getLang = (chatId) => userLang[chatId] || "ar";
+async function storeTeamInSheet(chatId, team) {
+  try {
+    await doc.useServiceAccountAuth({
+      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    });
+    await doc.loadInfo();
+    const sheet = doc.sheetsByIndex[0];
+    await sheet.addRow({ chatId, timestamp: new Date().toISOString(), team: team.join(", ") });
+  } catch (err) {
+    console.error("Google Sheet Error:", err);
+  }
+}
 
 bot.onText(/\/lang (.+)/, (msg, match) => {
   const lang = match[1];
@@ -84,59 +94,50 @@ bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, translations[lang].welcome);
 });
 
-bot.onText(/\/transfer/, async (msg) => {
+bot.onText(/\/price/, async (msg) => {
   const lang = getLang(msg.chat.id);
-  const team = userTeams[msg.chat.id];
-  if (!team || team.length < 11) return bot.sendMessage(msg.chat.id, translations[lang].tooShort);
+  priceSubscribers.add(msg.chat.id);
+  bot.sendMessage(msg.chat.id, translations[lang].subscribed);
+  sendPriceUpdate(msg.chat.id, lang);
+});
 
-  await fetchFPLData();
+async function sendPriceUpdate(chatId, lang) {
+  try {
+    const res = await axios.get("https://fplstatistics.co.uk/PriceChanges");
+    const $ = cheerio.load(res.data);
+    const rows = $("#ismTable tbody tr");
 
-  const suggestions = [];
-  const underperformers = [];
+    let rising = [];
+    let falling = [];
 
-  for (let name of team) {
-    const player = playerData.find(p => `${p.first_name} ${p.second_name}`.toLowerCase().includes(name.toLowerCase()));
-    if (!player) continue;
-    const pts = parseFloat(player.ep_next) || 0;
-    if (pts < 3 || player.status !== 'a') {
-      underperformers.push({ name: player.web_name, price: player.now_cost / 10 });
-    }
+    rows.each((_, row) => {
+      const cols = $(row).find("td");
+      const name = $(cols[1]).text().trim();
+      const change = $(cols[6]).text().trim().replace("%", "");
+      const delta = parseFloat(change);
+
+      const type = $(cols[4]).text().trim();
+      if (type.toLowerCase().includes("up") && delta >= 90) {
+        rising.push(`${name} (${delta}%)`);
+      }
+      if (type.toLowerCase().includes("down") && delta >= 80) {
+        falling.push(`${name} (${delta}%)`);
+      }
+    });
+
+    const msgText = [
+      translations[lang].priceHeader,
+      `\n${translations[lang].rising}`,
+      rising.length ? rising.join("\n") : "—",
+      `\n${translations[lang].falling}`,
+      falling.length ? falling.join("\n") : "—",
+    ].join("\n");
+
+    bot.sendMessage(chatId, msgText);
+  } catch (err) {
+    bot.sendMessage(chatId, "❌ خطأ في جلب تغيّرات الأسعار.");
   }
-
-  const topPerformers = playerData
-    .filter(p => parseFloat(p.ep_next) > 5 && p.status === 'a')
-    .sort((a, b) => parseFloat(b.ep_next) - parseFloat(a.ep_next))
-    .slice(0, 10);
-
-  suggestions.push(`${translations[lang].transferHeader}`);
-  suggestions.push(`\n${translations[lang].transferOut}`);
-  underperformers.forEach(p => suggestions.push(`- ${p.name} (${p.price}m)`));
-  suggestions.push(`\n${translations[lang].transferIn}`);
-  topPerformers.forEach(p => suggestions.push(`+ ${p.web_name} (${p.now_cost / 10}m)`));
-
-  bot.sendMessage(msg.chat.id, suggestions.join("\n"));
-});
-
-bot.onText(/\/image/, async (msg) => {
-  const lang = getLang(msg.chat.id);
-  const canvas = createCanvas(700, 500);
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#006400";
-  ctx.fillRect(0, 0, 700, 500);
-  ctx.fillStyle = "#fff";
-  ctx.font = "20px Arial";
-  ctx.fillText("Your FPL Team", 250, 50);
-
-  const team = userTeams[msg.chat.id] || [];
-  ctx.font = "16px Arial";
-  team.forEach((name, i) => {
-    ctx.fillText(name, 50, 100 + i * 25);
-  });
-
-  const buffer = canvas.toBuffer("image/png");
-  fs.writeFileSync("team.png", buffer);
-  bot.sendPhoto(msg.chat.id, buffer, { caption: translations[lang].imageCaption });
-});
+}
 
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
@@ -144,15 +145,13 @@ bot.on("message", async (msg) => {
   const lang = getLang(chatId);
 
   if (!text || typeof text !== 'string' || text.startsWith("/")) return;
-  
 
   const players = text.split("\n").map(p => p.trim()).filter(Boolean);
   if (players.length < 11) return bot.sendMessage(chatId, translations[lang].tooShort);
 
   await fetchFPLData();
-  await fetchFixtures();
-
   userTeams[chatId] = players;
+  await storeTeamInSheet(chatId, players);
 
   let totalScore = 0;
   let responses = [];
@@ -180,4 +179,11 @@ bot.on("message", async (msg) => {
   responses.push(`${translations[lang].vice} ${vice.name}`);
   responses.push(`${translations[lang].totalPoints} ${totalScore.toFixed(1)}`);
   bot.sendMessage(chatId, responses.join("\n"));
+});
+
+cron.schedule("0 22 * * *", () => {
+  priceSubscribers.forEach(chatId => {
+    const lang = getLang(chatId);
+    sendPriceUpdate(chatId, lang);
+  });
 });
