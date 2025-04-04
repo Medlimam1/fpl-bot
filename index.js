@@ -1,4 +1,4 @@
-// index.js - FPL Telegram Bot (Stable Final Version)
+// index.js - FPL Telegram Bot (Pro Version with /myteam, improved /price, and AI Best 11)
 require('dotenv').config();
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
@@ -34,6 +34,9 @@ const translations = {
     rising: "🔼 سيرتفع السعر:",
     falling: "🔽 سينخفض السعر:",
     subscribed: "✅ سيتم إرسال تحديث تغيّرات الأسعار لك يوميًا في الليل.",
+    noTeam: "ℹ️ لم يتم العثور على فريق محفوظ.",
+    yourTeam: "📋 فريقك الأخير:",
+    best11: "🌟 التشكيلة المثالية للجولة القادمة (ذكاء اصطناعي):"
   }
 };
 
@@ -58,6 +61,25 @@ bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, translations[lang].welcome);
 });
 
+bot.onText(/\/myteam/, async (msg) => {
+  const chatId = msg.chat.id;
+  const lang = getLang(chatId);
+  try {
+    await doc.useServiceAccountAuth({
+      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    });
+    await doc.loadInfo();
+    const sheet = doc.sheetsByIndex[0];
+    const rows = await sheet.getRows();
+    const latest = [...rows].reverse().find(row => row.chatId === String(chatId));
+    if (!latest) return bot.sendMessage(chatId, translations[lang].noTeam);
+    bot.sendMessage(chatId, `${translations[lang].yourTeam}\n${latest.team}`);
+  } catch (err) {
+    bot.sendMessage(chatId, "❌ حدث خطأ أثناء جلب الفريق.");
+  }
+});
+
 bot.onText(/\/price/, async (msg) => {
   const chatId = msg.chat.id;
   const lang = getLang(chatId);
@@ -70,34 +92,44 @@ async function sendPriceUpdate(chatId, lang) {
   try {
     const res = await axios.get("https://fplstatistics.co.uk/PriceChanges");
     const $ = cheerio.load(res.data);
-    const rows = $("#ismTable tbody tr");
-
     let rising = [], falling = [];
 
-    rows.each((_, row) => {
-      const cols = $(row).find("td");
+    $("table tr").each((i, el) => {
+      const cols = $(el).find("td");
       const name = $(cols[1]).text().trim();
-      const change = $(cols[6]).text().trim().replace("%", "");
-      const delta = parseFloat(change);
       const type = $(cols[4]).text().trim();
+      const percent = parseFloat($(cols[6]).text().replace("%", ""));
 
-      if (type.toLowerCase().includes("up") && delta >= 90) rising.push(`${name} (${delta}%)`);
-      if (type.toLowerCase().includes("down") && delta >= 80) falling.push(`${name} (${delta}%)`);
+      if (type.toLowerCase().includes("up") && percent >= 90) {
+        rising.push(`${name} (${percent}%)`);
+      } else if (type.toLowerCase().includes("down") && percent >= 80) {
+        falling.push(`${name} (${percent}%)`);
+      }
     });
 
-    const msgText = [
-      translations[lang].priceHeader,
-      translations[lang].rising,
-      rising.length ? rising.join("\n") : "—",
-      translations[lang].falling,
-      falling.length ? falling.join("\n") : "—"
-    ].join("\n");
-
-    bot.sendMessage(chatId, msgText);
+    const msg = `📈 ${translations[lang].priceHeader}\n\n🔼 ${translations[lang].rising}\n${rising.join("\n") || "—"}\n\n🔽 ${translations[lang].falling}\n${falling.join("\n") || "—"}`;
+    bot.sendMessage(chatId, msg);
   } catch (err) {
-    bot.sendMessage(chatId, "❌ خطأ في جلب تغيّرات الأسعار.");
+    bot.sendMessage(chatId, "❌ حدث خطأ أثناء جلب تغيّرات الأسعار.");
   }
 }
+
+bot.onText(/\/best11/, async (msg) => {
+  const chatId = msg.chat.id;
+  const lang = getLang(chatId);
+  await fetchFPLData();
+  const sorted = [...playerData]
+    .filter(p => p.ep_next && p.chance_of_playing_next_round >= 75)
+    .sort((a, b) => parseFloat(b.ep_next) - parseFloat(a.ep_next))
+    .slice(0, 11);
+
+  const message = [
+    `🌟 ${translations[lang].best11}`,
+    ...sorted.map(p => `✅ ${p.web_name} (${p.ep_next} pts)`)
+  ].join("\n");
+
+  bot.sendMessage(chatId, message);
+});
 
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
