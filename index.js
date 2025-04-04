@@ -41,17 +41,31 @@ const doc = new GoogleSpreadsheet(process.env.SHEET_ID);
 
 async function storeTeam(chatId, team) {
   try {
+    console.log("🟡 بدء محاولة حفظ الفريق في Google Sheet...");
+
     await doc.useServiceAccountAuth({
       client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
       private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     });
+
     await doc.loadInfo();
-    const sheet = doc.sheetsByTitle["FPL"];
-    await sheet.addRow({ chatId, timestamp: new Date().toISOString(), team: team.join(", ") });
+    console.log("✅ تم تسجيل الدخول إلى Google Sheets بنجاح");
+
+    const sheet = doc.sheetsByTitle["Fpl"]; // أو اسم الورقة الخاص بك
+    console.log("📄 تم تحديد الورقة:", sheet.title);
+
+    await sheet.addRow({
+      chatId,
+      timestamp: new Date().toISOString(),
+      team: team.join(", ")
+    });
+
+    console.log("✅ تم حفظ الفريق في الجدول");
   } catch (err) {
-    console.error("Google Sheet Error:", err);
+    console.error("❌ Google Sheet Error:", err.message);
   }
 }
+
 
 bot.onText(/\/start/, (msg) => {
   const lang = getLang(msg.chat.id);
