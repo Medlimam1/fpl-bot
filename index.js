@@ -6,6 +6,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const { GoogleSpreadsheet } = require("google-spreadsheet");
 const cron = require("node-cron");
+const { createCanvas } = require("canvas");
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
@@ -77,7 +78,20 @@ bot.onText(/\/myteam/, (msg) => {
   if (!team) {
     bot.sendMessage(chatId, translations[lang].noTeam);
   } else {
-    bot.sendMessage(chatId, `${translations[lang].yourTeam}\n\n${team.join("\n")}`);
+    // رسم صورة الفريق
+    const canvas = createCanvas(600, 400);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#e6f0ff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#000";
+    ctx.font = "bold 20px Arial";
+    ctx.fillText(translations[lang].yourTeam, 20, 40);
+    ctx.font = "16px Arial";
+    team.forEach((name, i) => {
+      ctx.fillText(`${i + 1}. ${name}`, 20, 70 + i * 25);
+    });
+    const image = canvas.toBuffer();
+    bot.sendPhoto(chatId, image);
   }
 });
 
@@ -88,8 +102,22 @@ bot.onText(/\/suggest/, async (msg) => {
     .filter(p => p.ep_next && p.status === 'a')
     .sort((a, b) => parseFloat(b.ep_next) - parseFloat(a.ep_next))
     .slice(0, 11);
-  const suggestions = topPlayers.map(p => `✅ ${p.web_name} (${parseFloat(p.ep_next).toFixed(1)} pts)`).join("\n");
-  bot.sendMessage(msg.chat.id, `${translations[lang].suggestion}\n\n${suggestions}`);
+
+  const canvas = createCanvas(600, 400);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#f0f0f0";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#000";
+  ctx.font = "bold 20px Arial";
+  ctx.fillText(translations[lang].suggestion, 20, 40);
+
+  ctx.font = "16px Arial";
+  topPlayers.forEach((p, i) => {
+    ctx.fillText(`${i + 1}. ${p.web_name} (${parseFloat(p.ep_next).toFixed(1)} pts)`, 20, 70 + i * 25);
+  });
+
+  const imageBuffer = canvas.toBuffer();
+  bot.sendPhoto(msg.chat.id, imageBuffer);
 });
 
 async function sendPriceUpdate(chatId, lang) {
