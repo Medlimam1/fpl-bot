@@ -143,3 +143,9 @@ responses.push(`\n${translations[lang].captain} ${captain.name}`);
 responses.push(`${translations[lang].vice} ${vice.name}`);
 responses.push(`${translations[lang].totalPoints} ${total.toFixed(1)}`);
 bot.sendMessage(chatId, responses.join("\n"));
+cron.schedule("0 22 * * *", () => {
+  priceSubscribers.forEach(chatId => {
+    const lang = getLang(chatId);
+    sendPriceUpdate(chatId, lang);
+  });
+});
