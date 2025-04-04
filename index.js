@@ -117,31 +117,29 @@ bot.on("message", async (msg) => {
   let captain = { name: "", points: 0 }, vice = { name: "", points: 0 };
 
   for (let name of players) {
-    const p = playerData.find(p => \`\${p.first_name} \${p.second_name}\`.toLowerCase().includes(name.toLowerCase()));
-    if (!p) {
-      responses.push(\`\${translations[lang].notFound} "\${name}"\`);
-      continue;
-    }
-    const pts = parseFloat(p.ep_next) || 0;
-    total += pts;
-    if (pts > captain.points) {
-      vice = { ...captain };
-      captain = { name: p.web_name, points: pts };
-    } else if (pts > vice.points) {
-      vice = { name: p.web_name, points: pts };
-    }
-    responses.push(\`✅ \${p.web_name} (\${pts.toFixed(1)})\`);
+  const p = playerData.find(p =>
+    `${p.first_name} ${p.second_name}`.toLowerCase().includes(name.toLowerCase())
+  );
+
+  if (!p) {
+    responses.push(`${translations[lang].notFound} "${name}"`);
+    continue;
   }
 
-  responses.push(\`\n\${translations[lang].captain} \${captain.name}\`);
-  responses.push(\`\${translations[lang].vice} \${vice.name}\`);
-  responses.push(\`\${translations[lang].totalPoints} \${total.toFixed(1)}\`);
-  bot.sendMessage(chatId, responses.join("\n"));
-});
+  const pts = parseFloat(p.ep_next) || 0;
+  total += pts;
 
-cron.schedule("0 22 * * *", () => {
-  priceSubscribers.forEach(chatId => {
-    const lang = getLang(chatId);
-    sendPriceUpdate(chatId, lang);
-  });
-});
+  if (pts > captain.points) {
+    vice = { ...captain };
+    captain = { name: p.web_name, points: pts };
+  } else if (pts > vice.points) {
+    vice = { name: p.web_name, points: pts };
+  }
+
+  responses.push(`✅ ${p.web_name} (${pts.toFixed(1)})`);
+}
+
+responses.push(`\n${translations[lang].captain} ${captain.name}`);
+responses.push(`${translations[lang].vice} ${vice.name}`);
+responses.push(`${translations[lang].totalPoints} ${total.toFixed(1)}`);
+bot.sendMessage(chatId, responses.join("\n"));
