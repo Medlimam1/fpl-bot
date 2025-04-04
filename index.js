@@ -94,56 +94,6 @@ bot.onText(/\/myteam/, (msg) => {
     bot.sendPhoto(chatId, image);
   }
 });
-const { createCanvas } = require("canvas");
-
-bot.onText(/\/suggest/, async (msg) => {
-  const chatId = msg.chat.id;
-  const lang = getLang(chatId);
-
-  try {
-    await fetchFPLData();
-
-    const bestPlayers = playerData
-      .filter(p => parseFloat(p.ep_next) > 0)
-      .sort((a, b) => parseFloat(b.ep_next) - parseFloat(a.ep_next))
-      .slice(0, 11);
-
-    if (!bestPlayers.length) {
-      return bot.sendMessage(chatId, "❌ تعذر العثور على بيانات اللاعبين.");
-    }
-
-    let caption = `⚽️ التشكيلة المثالية المتوقعة:\n`;
-    bestPlayers.forEach((p, i) => {
-      caption += `${i + 1}. ${p.web_name} - ${parseFloat(p.ep_next).toFixed(1)} نقطة\n`;
-    });
-
-    // توليد صورة
-    const canvas = createCanvas(600, 500);
-    const ctx = canvas.getContext("2d");
-
-    // خلفية بيضاء
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // عنوان
-    ctx.fillStyle = "#000000";
-    ctx.font = "bold 24px Arial";
-    ctx.fillText("🏆 أفضل 11 لاعب للجولة القادمة", 100, 40);
-
-    // أسماء اللاعبين
-    ctx.font = "20px Arial";
-    bestPlayers.forEach((p, i) => {
-      ctx.fillText(`${i + 1}. ${p.web_name} - ${parseFloat(p.ep_next).toFixed(1)} pts`, 50, 80 + i * 35);
-    });
-
-    const buffer = canvas.toBuffer("image/png");
-    bot.sendPhoto(chatId, buffer, { caption });
-  } catch (err) {
-    console.error("❌ Error in /suggest:", err);
-    bot.sendMessage(chatId, "❌ حدث خطأ أثناء توليد التشكيلة.");
-  }
-});
-
 bot.onText(/\/suggest/, async (msg) => {
   const lang = getLang(msg.chat.id);
   await fetchFPLData();
