@@ -1,4 +1,5 @@
 // index.js - FPL Telegram Bot (Stable Final Version)
+process.env.NODE_OPTIONS = '--openssl-legacy-provider';
 require('dotenv').config();
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
