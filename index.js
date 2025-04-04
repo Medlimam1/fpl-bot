@@ -23,7 +23,7 @@ const getLang = (chatId) => userLang[chatId] || "ar";
 
 const translations = {
   ar: {
-    welcome: "👋 أهلاً بك في بوت محمد الإمام لتحليل FPL!",
+    welcome: "👋 أهلاً بك في بوت تحليل FPL!",
     tooShort: "⚠️ أرسل على الأقل 11 لاعب.",
     totalPoints: "📊 مجموع النقاط المتوقعة:",
     notFound: "❌ غير موجود",
@@ -34,6 +34,9 @@ const translations = {
     rising: "🔼 سيرتفع السعر:",
     falling: "🔽 سينخفض السعر:",
     subscribed: "✅ سيتم إرسال تحديث تغيّرات الأسعار لك يوميًا في الليل.",
+    noTeam: "🚫 لا يوجد فريق محفوظ لك.",
+    yourTeam: "📋 فريقك الحالي:",
+    suggestion: "🤖 التشكيلة المقترحة للجولة القادمة:",
   }
 };
 
@@ -41,31 +44,17 @@ const doc = new GoogleSpreadsheet(process.env.SHEET_ID);
 
 async function storeTeam(chatId, team) {
   try {
-    console.log("🟡 بدء محاولة حفظ الفريق في Google Sheet...");
-
     await doc.useServiceAccountAuth({
       client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
       private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     });
-
     await doc.loadInfo();
-    console.log("✅ تم تسجيل الدخول إلى Google Sheets بنجاح");
-
-    const sheet = doc.sheetsByTitle["Fpl"]; // أو اسم الورقة الخاص بك
-    console.log("📄 تم تحديد الورقة:", sheet.title);
-
-    await sheet.addRow({
-      chatId,
-      timestamp: new Date().toISOString(),
-      team: team.join(", ")
-    });
-
-    console.log("✅ تم حفظ الفريق في الجدول");
+    const sheet = doc.sheetsByTitle["Fpl"];
+    await sheet.addRow({ chatId, timestamp: new Date().toISOString(), team: team.join(", ") });
   } catch (err) {
-    console.error("❌ Google Sheet Error:", err.message);
+    console.error("Google Sheet Error:", err);
   }
 }
-
 
 bot.onText(/\/start/, (msg) => {
   const lang = getLang(msg.chat.id);
@@ -78,6 +67,28 @@ bot.onText(/\/price/, async (msg) => {
   priceSubscribers.add(chatId);
   bot.sendMessage(chatId, translations[lang].subscribed);
   sendPriceUpdate(chatId, lang);
+});
+
+bot.onText(/\/myteam/, (msg) => {
+  const chatId = msg.chat.id;
+  const lang = getLang(chatId);
+  const team = userTeams[chatId];
+  if (!team) {
+    bot.sendMessage(chatId, translations[lang].noTeam);
+  } else {
+    bot.sendMessage(chatId, `${translations[lang].yourTeam}\n\n${team.join("\n")}`);
+  }
+});
+
+bot.onText(/\/suggest/, async (msg) => {
+  const lang = getLang(msg.chat.id);
+  await fetchFPLData();
+  const topPlayers = playerData
+    .filter(p => p.ep_next && p.status === 'a')
+    .sort((a, b) => parseFloat(b.ep_next) - parseFloat(a.ep_next))
+    .slice(0, 11);
+  const suggestions = topPlayers.map(p => `✅ ${p.web_name} (${parseFloat(p.ep_next).toFixed(1)} pts)`).join("\n");
+  bot.sendMessage(msg.chat.id, `${translations[lang].suggestion}\n\n${suggestions}`);
 });
 
 async function sendPriceUpdate(chatId, lang) {
@@ -131,10 +142,7 @@ bot.on("message", async (msg) => {
   let captain = { name: "", points: 0 }, vice = { name: "", points: 0 };
 
   for (let name of players) {
-    const p = playerData.find(p =>
-  p.web_name.toLowerCase() === name.toLowerCase()
-);
-
+    const p = playerData.find(p => `${p.first_name} ${p.second_name}`.toLowerCase().includes(name.toLowerCase()));
     if (!p) {
       responses.push(`${translations[lang].notFound} "${name}"`);
       continue;
