@@ -7,6 +7,7 @@ const cheerio = require("cheerio");
 const { GoogleSpreadsheet } = require("google-spreadsheet");
 const cron = require("node-cron");
 const { createCanvas } = require("canvas");
+const Tesseract = require("tesseract.js");
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
@@ -25,7 +26,7 @@ const getLang = (chatId) => userLang[chatId] || "ar";
 
 const translations = {
   ar: {
-    welcome: "👋 أهلاً بك في بوت تحليل FPL!",
+    welcome: "👋 أهلاً بك في بوت محمد الإمام لتحليل FPL!",
     tooShort: "⚠️ أرسل على الأقل 11 لاعب.",
     totalPoints: "📊 مجموع النقاط المتوقعة:",
     notFound: "❌ غير موجود",
@@ -39,6 +40,7 @@ const translations = {
     noTeam: "🚫 لا يوجد فريق محفوظ لك.",
     yourTeam: "📋 فريقك الحالي:",
     suggestion: "🤖 التشكيلة المقترحة للجولة القادمة:",
+    processingImage: "⏳ يتم الآن معالجة الصورة لاستخراج التشكيلة...",
   }
 };
 
@@ -48,7 +50,7 @@ async function storeTeam(chatId, team) {
   try {
     await doc.useServiceAccountAuth({
       client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: process.env.GOOGLE_PRIVATE_KEY,
+      private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\n/g, '\n'),
     });
     await doc.loadInfo();
     const sheet = doc.sheetsByTitle["Fpl"];
@@ -71,14 +73,13 @@ bot.onText(/\/price/, async (msg) => {
   sendPriceUpdate(chatId, lang);
 });
 
-bot.onText(/\/myteam/, (msg) => {
+bot.onText(/\/myteam/, async (msg) => {
   const chatId = msg.chat.id;
   const lang = getLang(chatId);
   const team = userTeams[chatId];
   if (!team) {
     bot.sendMessage(chatId, translations[lang].noTeam);
   } else {
-    // رسم صورة الفريق
     const canvas = createCanvas(600, 400);
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#e6f0ff";
@@ -94,6 +95,7 @@ bot.onText(/\/myteam/, (msg) => {
     bot.sendPhoto(chatId, image);
   }
 });
+
 bot.onText(/\/suggest/, async (msg) => {
   const lang = getLang(msg.chat.id);
   await fetchFPLData();
@@ -109,7 +111,6 @@ bot.onText(/\/suggest/, async (msg) => {
   ctx.fillStyle = "#000";
   ctx.font = "bold 20px Arial";
   ctx.fillText(translations[lang].suggestion, 20, 40);
-
   ctx.font = "16px Arial";
   topPlayers.forEach((p, i) => {
     ctx.fillText(`${i + 1}. ${p.web_name} (${parseFloat(p.ep_next).toFixed(1)} pts)`, 20, 70 + i * 25);
@@ -117,6 +118,30 @@ bot.onText(/\/suggest/, async (msg) => {
 
   const imageBuffer = canvas.toBuffer();
   bot.sendPhoto(msg.chat.id, imageBuffer);
+});
+
+bot.on("photo", async (msg) => {
+  const chatId = msg.chat.id;
+  const lang = getLang(chatId);
+  bot.sendMessage(chatId, translations[lang].processingImage);
+
+  const fileId = msg.photo[msg.photo.length - 1].file_id;
+  const fileUrl = await bot.getFileLink(fileId);
+
+  const { data: imageBuffer } = await axios.get(fileUrl, { responseType: "arraybuffer" });
+  const {
+    data: { text },
+  } = await Tesseract.recognize(imageBuffer, "eng");
+
+  const extractedPlayers = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^[A-Za-z].{1,}/.test(line))
+    .slice(0, 11);
+
+  userTeams[chatId] = extractedPlayers;
+  await storeTeam(chatId, extractedPlayers);
+  bot.sendMessage(chatId, `${translations[lang].yourTeam}\n${extractedPlayers.join("\n")}`);
 });
 
 async function sendPriceUpdate(chatId, lang) {
