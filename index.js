@@ -46,7 +46,7 @@ async function storeTeam(chatId, team) {
       private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     });
     await doc.loadInfo();
-    const sheet = doc.sheetsByIndex[0];
+    const sheet = doc.sheetsByTitle["FPL"];
     await sheet.addRow({ chatId, timestamp: new Date().toISOString(), team: team.join(", ") });
   } catch (err) {
     console.error("Google Sheet Error:", err);
