@@ -1,4 +1,4 @@
-// index.js - Main FPL Bot file with Google Sheet and Price Change
+// index.js - FPL Telegram Bot (Stable Final Version)
 require('dotenv').config();
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
@@ -88,9 +88,9 @@ async function sendPriceUpdate(chatId, lang) {
     const msgText = [
       translations[lang].priceHeader,
       translations[lang].rising,
-      rising.join("\n") || "—",
+      rising.length ? rising.join("\n") : "—",
       translations[lang].falling,
-      falling.join("\n") || "—"
+      falling.length ? falling.join("\n") : "—"
     ].join("\n");
 
     bot.sendMessage(chatId, msgText);
@@ -117,32 +117,28 @@ bot.on("message", async (msg) => {
   let captain = { name: "", points: 0 }, vice = { name: "", points: 0 };
 
   for (let name of players) {
-  const p = playerData.find(p =>
-    `${p.first_name} ${p.second_name}`.toLowerCase().includes(name.toLowerCase())
-  );
-
-  if (!p) {
-    responses.push(`${translations[lang].notFound} "${name}"`);
-    continue;
+    const p = playerData.find(p => `${p.first_name} ${p.second_name}`.toLowerCase().includes(name.toLowerCase()));
+    if (!p) {
+      responses.push(`${translations[lang].notFound} "${name}"`);
+      continue;
+    }
+    const pts = parseFloat(p.ep_next) || 0;
+    total += pts;
+    if (pts > captain.points) {
+      vice = { ...captain };
+      captain = { name: p.web_name, points: pts };
+    } else if (pts > vice.points) {
+      vice = { name: p.web_name, points: pts };
+    }
+    responses.push(`✅ ${p.web_name} (${pts.toFixed(1)})`);
   }
 
-  const pts = parseFloat(p.ep_next) || 0;
-  total += pts;
+  responses.push(`\n${translations[lang].captain} ${captain.name}`);
+  responses.push(`${translations[lang].vice} ${vice.name}`);
+  responses.push(`${translations[lang].totalPoints} ${total.toFixed(1)}`);
+  bot.sendMessage(chatId, responses.join("\n"));
+});
 
-  if (pts > captain.points) {
-    vice = { ...captain };
-    captain = { name: p.web_name, points: pts };
-  } else if (pts > vice.points) {
-    vice = { name: p.web_name, points: pts };
-  }
-
-  responses.push(`✅ ${p.web_name} (${pts.toFixed(1)})`);
-}
-
-responses.push(`\n${translations[lang].captain} ${captain.name}`);
-responses.push(`${translations[lang].vice} ${vice.name}`);
-responses.push(`${translations[lang].totalPoints} ${total.toFixed(1)}`);
-bot.sendMessage(chatId, responses.join("\n"));
 cron.schedule("0 22 * * *", () => {
   priceSubscribers.forEach(chatId => {
     const lang = getLang(chatId);
